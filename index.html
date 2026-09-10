@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>日常甜寓 | 甜點選購與後台管理</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBrKs913YIdc2bKwQchvpGZJj76qdc2nHk",
+    authDomain: "dessertshop365.firebaseapp.com",
+    projectId: "dessertshop365",
+    storageBucket: "dessertshop365.firebasestorage.app",
+    messagingSenderId: "918872634726",
+    appId: "1:918872634726:web:e2a2163ad1326b35b504a7",
+    measurementId: "G-BB216HQYH3",
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.__db = firebase.firestore();
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+function useIsMobile(breakpoint = 720) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth <= breakpoint : false
+  );
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
+/* ---------------------------------------------------------
+   色彩與字體 token
+--------------------------------------------------------- */
+const COLORS = {
+  cream: "#FBF3E7",
+  cocoa: "#2B1810",
+  cocoaSoft: "#5A4437",
+  raspberry: "#A63446",
+  caramel: "#C98A32",
+  matcha: "#7C9163",
+  matchaSoft: "#EDF0E4",
+  line: "#E6D9C8",
+  paperWhite: "#FFFDF9",
+};
+const PALETTE_ROTATE = [COLORS.raspberry, COLORS.caramel, COLORS.matcha];
+
+/* ---------------------------------------------------------
+   甜點小圖示（純 SVG，避免使用真實照片版權問題）
+--------------------------------------------------------- */
+function DessertIcon({ type, color, size = 56 }) {
+  const common = { width: size, height: size, viewBox: "0 0 64 64" };
+  if (type === "cake") {
+    return (
+      <svg {...common}>
+        <path d="M8 52 L32 14 L56 52 Z" fill={color} opacity="0.18" />
+        <path d="M8 52 L32 14 L56 52 Z" fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" />
+        <path d="M14 46 Q20 40 26 46 T38 46 T50 46" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="32" cy="20" r="3.4" fill={color} />
+      </svg>
+    );
+  }
+  if (type === "cookie") {
+    return (
+      <svg {...common}>
+        <circle cx="32" cy="32" r="20" fill={color} opacity="0.18" />
+        <circle cx="32" cy="32" r="20" fill="none" stroke={color} strokeWidth="2.5" />
+        <circle cx="24" cy="26" r="2.6" fill={color} />
+        <circle cx="38" cy="24" r="2.2" fill={color} />
+        <circle cx="40" cy="36" r="2.6" fill={color} />
+        <circle cx="26" cy="40" r="2" fill={color} />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M20 16 H44 L40 50 Q32 54 24 50 Z" fill={color} opacity="0.18" />
+      <path d="M20 16 H44 L40 50 Q32 54 24 50 Z" fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M23 26 H41" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M34 12 L38 24" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ---------------------------------------------------------
+   商品資料（預設菜單，可在後台新增/編輯）
+--------------------------------------------------------- */
+const DEFAULT_PRODUCTS_RAW = [
+  { id: "p1", name: "覆盆莓歐培拉", category: "cake", price: 180, desc: "杏仁蛋糕夾層疊上覆盆莓甘納許，微酸帶果香。" },
+  { id: "p2", name: "熔岩巧克力蛋糕", category: "cake", price: 150, desc: "溫熱切開流出濃郁巧克力岩漿，需現點現烤。" },
+  { id: "p3", name: "法式檸檬塔", category: "cake", price: 140, desc: "酥脆塔皮配上清爽檸檬奶餡，收尾略帶焦糖香氣。" },
+  { id: "c1", name: "海鹽焦糖餅乾", category: "cookie", price: 60, desc: "奶油香氣濃厚，鹹甜交織的手工餅乾。" },
+  { id: "c2", name: "抹茶馬卡龍", category: "cookie", price: 55, desc: "外殼酥脆內餡綿密，抹茶苦韻恰到好處。" },
+  { id: "c3", name: "榛果可頌酥", category: "cookie", price: 65, desc: "千層可頌裹上榛果碎，層層酥脆。" },
+  { id: "d1", name: "焦糖烤布丁", category: "drink", price: 85, desc: "濃郁蛋香佐苦甜焦糖漿，口感綿滑。" },
+  { id: "d2", name: "抹茶拿鐵凍飲", category: "drink", price: 110, desc: "宇治抹茶與鮮奶調和，冰涼香醇。" },
+  { id: "d3", name: "芒果奶酪", category: "drink", price: 95, desc: "當季芒果泥搭配輕盈奶酪，清爽解膩。" },
+];
+const DEFAULT_BASE_TIME = new Date("2024-01-01T00:00:00").getTime();
+
+function defaultShippingCategory(category) {
+  if (category === "cake") return "chilled";
+  if (category === "giftbox") return "gift";
+  return "ambient";
+}
+
+const DEFAULT_PRODUCTS = DEFAULT_PRODUCTS_RAW.map((p, i) => ({
+  ...p,
+  createdAt: DEFAULT_BASE_TIME - i * 1000,
+  shippingCategory: defaultShippingCategory(p.category),
+}));
+
+const CATEGORY_LABEL = { all: "全部", cake: "蛋糕", cookie: "餅乾", drink: "常溫甜點", giftbox: "禮盒" };
+const SHIPPING_CATEGORY_LABEL = { ambient: "常溫商品", chilled: "冷藏", gift: "彌月／婚禮" };
+
+const SHIPPING_RULES = {
+  ambient: {
+    "711": { fee: 60, freeThreshold: 699 },
+    blackcat: { fee: 130, freeThreshold: 999 },
+  },
+  chilled: {
+    blackcat: { fee: 160, freeThreshold: 1500 },
+  },
+  gift: {
+    blackcat: { fee: 130, freeThreshold: 3000 },
+  },
+};
+
+function computeShipping(shippingCategory, deliveryMethod, subtotal) {
+  const rule = SHIPPING_RULES[shippingCategory] && SHIPPING_RULES[shippingCategory][deliveryMethod];
+  if (!rule) return 0;
+  return subtotal >= rule.freeThreshold ? 0 : rule.fee;
+}
+
+const fmt = (n) => `NT$${n.toLocaleString()}`;
+
+/* ---------------------------------------------------------
+   儲存輔助 —— 改用 Firebase Firestore 雲端資料庫，所有裝置、所有人看到的都是同一份資料
+--------------------------------------------------------- */
+const db = window.__db;
+
+// 訂單／優惠券／外觀設定／收款設定：各自存成一份文件（shopSettings 集合底下）
+async function storageGetJSON(key, fallback) {
+  try {
+    const doc = await db.collection("shopSettings").doc(key).get();
+    if (!doc.exists) return fallback;
+    const data = doc.data();
+    return data && data.payload !== undefined ? data.payload : fallback;
+  } catch (e) {
+    console.error("Firestore 讀取失敗", key, e);
+    return fallback;
+  }
+}
+async function storageSetJSON(key, value) {
+  try {
+    await db.collection("shopSettings").doc(key).set({ payload: value });
+  } catch (e) {
+    console.error("Firestore 寫入失敗", key, e);
+  }
+}
+
+// 商品：改用「一個商品一份文件」的方式存放（products 集合），避免圖片累積起來超過單一文件的大小上限
+async function loadProductsFromFirestore() {
+  try {
+    const snap = await db.collection("products").get();
+    if (snap.empty) return null; // null 代表這個資料庫還沒有任何商品資料（第一次使用）
+    return snap.docs.map((d) => d.data());
+  } catch (e) {
+    console.error("Firestore 商品讀取失敗", e);
+    return null;
+  }
+}
+async function seedProductsIfEmpty(defaults) {
+  try {
+    const batch = db.batch();
+    defaults.forEach((p) => {
+      batch.set(db.collection("products").doc(p.id), p);
+    });
+    await batch.commit();
+  } catch (e) {
+    console.error("Firestore 商品初始化失敗", e);
+  }
+}
+async function saveProductDoc(product) {
+  try {
+    await db.collection("products").doc(product.id).set(product);
+  } catch (e) {
+    console.error("Firestore 商品寫入失敗", e);
+  }
+}
+async function deleteProductDoc(id) {
+  try {
+    await db.collection("products").doc(id).delete();
+  } catch (e) {
+    console.error("Firestore 商品刪除失敗", e);
+  }
+}
+
+/* ---------------------------------------------------------
+   圖片上傳輔助：讀取檔案並壓縮成較小的 base64 圖片，避免超出儲存上限
+--------------------------------------------------------- */
+function readImageFileAsCompressedDataURL(file, maxWidth = 900, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("讀取檔案失敗"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("圖片載入失敗"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------------------------------------------------------
+   主程式
+--------------------------------------------------------- */
+function DessertShop() {
+  const isMobile = useIsMobile();
+  const [view, setView] = useState(() => {
+    if (typeof window === "undefined") return "shop";
+    const h = window.location.hash.replace("#", "");
+    if (h === "dashboard") return "dashboard";
+    if (h === "admin") return "admin";
+    return "shop";
+  }); // shop | admin | dashboard
+  const [category, setCategory] = useState("all");
+  const [cart, setCart] = useState({});
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [orderDone, setOrderDone] = useState(null);
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupPhone, setLookupPhone] = useState("");
+  const [heroIndex, setHeroIndex] = useState(0);
+
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponMsg, setCouponMsg] = useState("");
+
+  const [custName, setCustName] = useState("");
+  const [custPhone, setCustPhone] = useState("");
+  const [custNote, setCustNote] = useState("");
+  const [sameAsOrderer, setSameAsOrderer] = useState(true);
+  const [recipientName, setRecipientName] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState("711");
+  const [deliveryDetail, setDeliveryDetail] = useState("");
+  const [transferLast5Input, setTransferLast5Input] = useState("");
+  const [transferLast5Error, setTransferLast5Error] = useState("");
+
+  const [orders, setOrders] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [catalog, setCatalog] = useState(DEFAULT_PRODUCTS);
+  const [branding, setBranding] = useState({ logo: null, hero: null });
+  const [paymentInfo, setPaymentInfo] = useState({ bankName: "", bankCode: "", accountNumber: "", accountHolder: "" });
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  const [adminTab, setAdminTab] = useState("dashboard");
+  const [newCoupon, setNewCoupon] = useState({ code: "", type: "percent", value: 10, expiresAt: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", category: "cake", price: "", desc: "", image: null, availableUntil: "", shippingCategory: "ambient" });
+  const [editingProductId, setEditingProductId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const [o, c, b, pay] = await Promise.all([
+        storageGetJSON("orders", []),
+        storageGetJSON("coupons", []),
+        storageGetJSON("branding", { logo: null, hero: null }),
+        storageGetJSON("paymentInfo", { bankName: "", bankCode: "", accountNumber: "", accountHolder: "" }),
+      ]);
+      let p = await loadProductsFromFirestore();
+      if (p === null) {
+        // 這個 Firebase 專案第一次被使用，還沒有商品資料，先把預設菜單寫進去
+        await seedProductsIfEmpty(DEFAULT_PRODUCTS);
+        p = DEFAULT_PRODUCTS;
+      }
+      setOrders(o);
+      setCoupons(c);
+      setCatalog(p && p.length ? p : DEFAULT_PRODUCTS);
+      setBranding(b || { logo: null, hero: null });
+      setPaymentInfo(pay || { bankName: "", bankCode: "", accountNumber: "", accountHolder: "" });
+      setDataLoaded(true);
+    })();
+  }, []);
+
+  const heroImages = useMemo(() => {
+    if (branding.heroImages && branding.heroImages.length) return branding.heroImages;
+    if (branding.hero) return [branding.hero];
+    return [];
+  }, [branding]);
+
+  useEffect(() => {
+    if (heroImages.length < 2) return;
+    const timer = setInterval(() => {
+      setHeroIndex((i) => (i + 1) % heroImages.length);
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [heroImages.length]);
+
+  useEffect(() => {
+    if (heroIndex >= heroImages.length) setHeroIndex(0);
+  }, [heroImages.length, heroIndex]);
+
+  const products = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const visible = catalog.filter((p) => {
+      if (p.category === "giftbox" && p.availableUntil && p.availableUntil < today) return false;
+      return true;
+    });
+    const filtered = category === "all" ? visible : visible.filter((p) => p.category === category);
+    return filtered.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [category, catalog]);
+
+  const cartItems = useMemo(
+    () =>
+      Object.entries(cart)
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ ...catalog.find((p) => p.id === id), qty })),
+    [cart, catalog]
+  );
+  const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
+  const subtotal = cartItems.reduce((s, i) => s + i.qty * i.price, 0);
+
+  const discount = useMemo(() => {
+    if (!appliedCoupon) return 0;
+    if (appliedCoupon.type === "percent") return Math.round((subtotal * appliedCoupon.value) / 100);
+    return Math.min(subtotal, appliedCoupon.value);
+  }, [appliedCoupon, subtotal]);
+
+  const cartShippingCategory = useMemo(() => {
+    if (cartItems.some((i) => i.shippingCategory === "gift")) return "gift";
+    if (cartItems.some((i) => i.shippingCategory === "chilled")) return "chilled";
+    return "ambient";
+  }, [cartItems]);
+
+  useEffect(() => {
+    if (cartShippingCategory !== "ambient" && deliveryMethod === "711") {
+      setDeliveryMethod("blackcat");
+    }
+  }, [cartShippingCategory, deliveryMethod]);
+
+  const shippingFee = useMemo(
+    () => (cartItems.length === 0 ? 0 : computeShipping(cartShippingCategory, deliveryMethod, subtotal)),
+    [cartShippingCategory, deliveryMethod, subtotal, cartItems.length]
+  );
+
+  const total = Math.max(0, subtotal - discount) + shippingFee;
+
+  const changeQty = (id, delta) => {
+    setCart((prev) => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + delta) }));
+  };
+
+  const applyCoupon = () => {
+    const code = couponCode.trim().toUpperCase();
+    if (!code) return;
+    const found = coupons.find((c) => c.code.toUpperCase() === code);
+    if (!found) { setCouponMsg("查無此優惠碼"); setAppliedCoupon(null); return; }
+    if (!found.active) { setCouponMsg("此優惠碼已停用"); setAppliedCoupon(null); return; }
+    if (found.expiresAt && found.expiresAt < new Date().toISOString().slice(0, 10)) {
+      setCouponMsg("此優惠碼已過期"); setAppliedCoupon(null); return;
+    }
+    setAppliedCoupon(found);
+    setCouponMsg(`已套用優惠碼「${found.code}」`);
+  };
+
+  const resetCheckoutForm = () => {
+    setCart({}); setAppliedCoupon(null); setCouponCode(""); setCouponMsg("");
+    setCustName(""); setCustPhone(""); setCustNote("");
+    setSameAsOrderer(true); setRecipientName(""); setRecipientPhone("");
+    setDeliveryMethod("711"); setDeliveryDetail("");
+    setTransferLast5Input(""); setTransferLast5Error("");
+  };
+
+  const submitOrder = async () => {
+    if (cartItems.length === 0) return;
+    if (!deliveryDetail.trim()) return;
+    const finalRecipientName = sameAsOrderer ? custName : recipientName;
+    const finalRecipientPhone = sameAsOrderer ? custPhone : recipientPhone;
+    if (!sameAsOrderer && (!recipientName.trim() || !recipientPhone.trim())) return;
+    const order = {
+      id: "ORD" + Date.now(),
+      items: cartItems.map(({ id, name, price, qty }) => ({ id, name, price, qty })),
+      subtotal, discount, shippingFee, shippingCategory: cartShippingCategory, total,
+      couponCode: appliedCoupon ? appliedCoupon.code : null,
+      customerName: custName || "未留姓名",
+      phone: custPhone, note: custNote,
+      recipientName: finalRecipientName || "未留姓名",
+      recipientPhone: finalRecipientPhone,
+      deliveryMethod, deliveryDetail,
+      paymentMethod: "transfer",
+      transferLast5: "",
+      paymentConfirmed: false,
+      paymentDeadline: Date.now() + 48 * 60 * 60 * 1000,
+      status: "待處理",
+      createdAt: new Date().toISOString(),
+    };
+    const next = [order, ...orders];
+    setOrders(next);
+    await storageSetJSON("orders", next);
+    setOrderDone(order);
+    resetCheckoutForm();
+  };
+
+  const confirmTransferPaymentFor = async (orderId, code) => {
+    const trimmed = (code || "").trim();
+    if (!/^\d{5}$/.test(trimmed)) {
+      return { ok: false, error: "請輸入正確的匯款帳號後五碼（5 位數字）。" };
+    }
+    const target = orders.find((o) => o.id === orderId);
+    if (!target) return { ok: false, error: "找不到此訂單。" };
+    if (target.paymentConfirmed) return { ok: true, order: target };
+    if (target.paymentDeadline && Date.now() > target.paymentDeadline) {
+      return { ok: false, error: "已超過 48 小時付款確認期限，請直接與店家聯繫確認訂單。" };
+    }
+    const next = orders.map((o) => (o.id === orderId ? { ...o, transferLast5: trimmed, paymentConfirmed: true } : o));
+    setOrders(next);
+    await storageSetJSON("orders", next);
+    const updated = next.find((o) => o.id === orderId);
+    return { ok: true, order: updated };
+  };
+
+  const confirmTransferPayment = async () => {
+    if (!orderDone) return;
+    const result = await confirmTransferPaymentFor(orderDone.id, transferLast5Input);
+    if (!result.ok) {
+      setTransferLast5Error(result.error);
+      return;
+    }
+    setOrderDone(result.order);
+    setTransferLast5Error("");
+  };
+
+  const updateOrderStatus = async (id, status) => {
+    const next = orders.map((o) => (o.id === id ? { ...o, status } : o));
+    setOrders(next);
+    await storageSetJSON("orders", next);
+  };
+
+  const addCoupon = async () => {
+    const code = newCoupon.code.trim().toUpperCase();
+    if (!code || !newCoupon.value) return;
+    if (coupons.some((c) => c.code.toUpperCase() === code)) return;
+    const next = [{ code, type: newCoupon.type, value: Number(newCoupon.value), expiresAt: newCoupon.expiresAt, active: true }, ...coupons];
+    setCoupons(next);
+    await storageSetJSON("coupons", next);
+    setNewCoupon({ code: "", type: "percent", value: 10, expiresAt: "" });
+  };
+
+  const toggleCoupon = async (code) => {
+    const next = coupons.map((c) => (c.code === code ? { ...c, active: !c.active } : c));
+    setCoupons(next);
+    await storageSetJSON("coupons", next);
+  };
+
+  const deleteCoupon = async (code) => {
+    const next = coupons.filter((c) => c.code !== code);
+    setCoupons(next);
+    await storageSetJSON("coupons", next);
+  };
+
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    const dataUrl = await readImageFileAsCompressedDataURL(file, 300, 0.85);
+    const next = { ...branding, logo: dataUrl };
+    setBranding(next);
+    await storageSetJSON("branding", next);
+  };
+  const removeLogo = async () => {
+    const next = { ...branding, logo: null };
+    setBranding(next);
+    await storageSetJSON("branding", next);
+  };
+  const uploadHeroImages = async (files) => {
+    if (!files || files.length === 0) return;
+    const newDataUrls = await Promise.all(
+      Array.from(files).map((f) => readImageFileAsCompressedDataURL(f, 1000, 0.85))
+    );
+    const existing = branding.heroImages && branding.heroImages.length ? branding.heroImages : (branding.hero ? [branding.hero] : []);
+    const next = { ...branding, heroImages: [...existing, ...newDataUrls], hero: undefined };
+    setBranding(next);
+    await storageSetJSON("branding", next);
+  };
+  const removeHeroImage = async (index) => {
+    const existing = branding.heroImages && branding.heroImages.length ? branding.heroImages : (branding.hero ? [branding.hero] : []);
+    const next = { ...branding, heroImages: existing.filter((_, i) => i !== index), hero: undefined };
+    setBranding(next);
+    await storageSetJSON("branding", next);
+  };
+
+  const savePaymentInfo = async (info) => {
+    setPaymentInfo(info);
+    await storageSetJSON("paymentInfo", info);
+  };
+
+  const saveProduct = async () => {
+    const name = newProduct.name.trim();
+    const price = Number(newProduct.price);
+    if (!name || !price) return;
+    let next;
+    let savedProduct;
+    if (editingProductId) {
+      savedProduct = catalog.find((p) => p.id === editingProductId);
+      savedProduct = {
+        ...savedProduct, name, category: newProduct.category, price, desc: newProduct.desc, image: newProduct.image || null,
+        availableUntil: newProduct.category === "giftbox" ? (newProduct.availableUntil || "") : "",
+        shippingCategory: newProduct.shippingCategory || "ambient",
+      };
+      next = catalog.map((p) => (p.id === editingProductId ? savedProduct : p));
+    } else {
+      const id = "d" + Date.now();
+      savedProduct = {
+        id, name, category: newProduct.category, price, desc: newProduct.desc, image: newProduct.image || null,
+        availableUntil: newProduct.category === "giftbox" ? (newProduct.availableUntil || "") : "",
+        shippingCategory: newProduct.shippingCategory || "ambient",
+        createdAt: Date.now(),
+      };
+      next = [...catalog, savedProduct];
+    }
+    setCatalog(next);
+    await saveProductDoc(savedProduct);
+    setNewProduct({ name: "", category: "cake", price: "", desc: "", image: null, availableUntil: "", shippingCategory: "ambient" });
+    setEditingProductId(null);
+  };
+
+  const startEditProduct = (p) => {
+    setEditingProductId(p.id);
+    setNewProduct({ name: p.name, category: p.category, price: p.price, desc: p.desc || "", image: p.image || null, availableUntil: p.availableUntil || "", shippingCategory: p.shippingCategory || "ambient" });
+  };
+  const cancelEditProduct = () => {
+    setEditingProductId(null);
+    setNewProduct({ name: "", category: "cake", price: "", desc: "", image: null, availableUntil: "", shippingCategory: "ambient" });
+  };
+  const deleteProduct = async (id) => {
+    const next = catalog.filter((p) => p.id !== id);
+    setCatalog(next);
+    await deleteProductDoc(id);
+  };
+
+  const monthlyReport = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const month = o.createdAt.slice(0, 7);
+      if (!map[month]) map[month] = { month, revenue: 0, count: 0 };
+      map[month].revenue += o.total;
+      map[month].count += 1;
+    });
+    return Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
+  }, [orders]);
+
+  const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
+
+  const fontDisplay = { fontFamily: "'Noto Serif TC', serif" };
+  const fontBody = { fontFamily: "'Noto Sans TC', sans-serif" };
+
+  /* =================================================
+     獨立儀表板畫面（不含後台側邊選單，資料與前台/後台完全同步）
+  ================================================= */
+  if (view === "dashboard") {
+    return (
+      <div style={{ ...fontBody, background: COLORS.cream, minHeight: "100vh" }}>
+        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 28px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperWhite }}>
+          <div style={{ ...fontDisplay, fontSize: 20, fontWeight: 900, color: COLORS.cocoa }}>日常甜寓 · 銷售儀表板</div>
+          <div style={{ display: "flex", gap: 16 }}>
+            <a href="#admin" onClick={() => setView("admin")} style={{ fontSize: 12.5, color: COLORS.cocoaSoft, textDecoration: "underline" }}>
+              前往完整後台管理
+            </a>
+            <a href="#" onClick={(e) => { e.preventDefault(); window.location.hash = ""; setView("shop"); }} style={{ fontSize: 12.5, color: COLORS.cocoaSoft, textDecoration: "underline" }}>
+              回到商店前台
+            </a>
+          </div>
+        </header>
+        <div style={{ padding: "32px 40px" }}>
+          {!dataLoaded ? (
+            <div style={{ color: COLORS.cocoaSoft }}>載入中…</div>
+          ) : (
+            <DashboardTab monthlyReport={monthlyReport} totalRevenue={totalRevenue} orderCount={orders.length} fontDisplay={fontDisplay} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* =================================================
+     後台管理畫面
+  ================================================= */
+  if (view === "admin") {
+    const navItems = [
+      { key: "dashboard", label: "銷售報表", icon: "📊" },
+      { key: "orders", label: "訂單管理", icon: "🧾" },
+      { key: "products", label: "商品管理", icon: "🍰" },
+      { key: "coupons", label: "優惠券管理", icon: "🎟️" },
+      { key: "branding", label: "外觀設定", icon: "🏬" },
+      { key: "payment", label: "收款設定", icon: "🧾" },
+    ];
+    return (
+      <div style={{ ...fontBody, background: COLORS.cream, minHeight: "100vh", display: "flex", flexDirection: isMobile ? "column" : "row" }}>
+        {isMobile ? (
+          <div style={{ background: COLORS.cocoa, color: COLORS.cream, padding: "14px 12px", position: "sticky", top: 0, zIndex: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ ...fontDisplay, fontSize: 17, fontWeight: 700 }}>甜點後台</div>
+              <button onClick={() => { window.location.hash = ""; setView("shop"); }} style={{
+                fontSize: 12, color: COLORS.cream, background: "transparent", border: "1px solid rgba(255,255,255,0.3)",
+                borderRadius: 999, padding: "5px 10px", cursor: "pointer",
+              }}>
+                🏬 回商店
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {navItems.map(({ key, label, icon }) => (
+                <button key={key} onClick={() => setAdminTab(key)} style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px",
+                  borderRadius: 999, border: "none", cursor: "pointer", fontSize: 13,
+                  fontWeight: adminTab === key ? 700 : 400,
+                  background: adminTab === key ? COLORS.cream : "rgba(255,255,255,0.12)",
+                  color: adminTab === key ? COLORS.cocoa : COLORS.cream,
+                }}>
+                  <span>{icon}</span>{label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div style={{ width: 220, background: COLORS.cocoa, color: COLORS.cream, display: "flex", flexDirection: "column", padding: "24px 16px", flexShrink: 0 }}>
+            <div style={{ ...fontDisplay, fontSize: 20, fontWeight: 700, marginBottom: 4 }}>甜點後台</div>
+            <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 28 }}>Backoffice</div>
+
+            {navItems.map(({ key, label, icon }) => (
+              <button key={key} onClick={() => setAdminTab(key)} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 6,
+                borderRadius: 8, border: "none", cursor: "pointer", textAlign: "left", fontSize: 14,
+                fontWeight: adminTab === key ? 700 : 400,
+                background: adminTab === key ? "rgba(255,255,255,0.12)" : "transparent", color: COLORS.cream,
+              }}>
+                <span>{icon}</span>{label}
+              </button>
+            ))}
+
+            <div style={{ flex: 1 }} />
+            <button onClick={() => { if (typeof window !== "undefined") window.location.hash = ""; setView("shop"); }} style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.25)", background: "transparent", color: COLORS.cream,
+              cursor: "pointer", fontSize: 13,
+            }}>
+              🏬 回到商店前台
+            </button>
+          </div>
+        )}
+
+        <div style={{ flex: 1, padding: isMobile ? "20px 16px" : "32px 40px", overflowY: "auto" }}>
+          {!dataLoaded ? (
+            <div style={{ color: COLORS.cocoaSoft }}>載入中…</div>
+          ) : adminTab === "dashboard" ? (
+            <DashboardTab monthlyReport={monthlyReport} totalRevenue={totalRevenue} orderCount={orders.length} fontDisplay={fontDisplay} />
+          ) : adminTab === "orders" ? (
+            <OrdersTab orders={orders} updateOrderStatus={updateOrderStatus} fontDisplay={fontDisplay} />
+          ) : adminTab === "products" ? (
+            <ProductsTab catalog={catalog} newProduct={newProduct} setNewProduct={setNewProduct} saveProduct={saveProduct}
+              startEditProduct={startEditProduct} cancelEditProduct={cancelEditProduct} editingProductId={editingProductId}
+              deleteProduct={deleteProduct} fontDisplay={fontDisplay} />
+          ) : adminTab === "coupons" ? (
+            <CouponsTab coupons={coupons} newCoupon={newCoupon} setNewCoupon={setNewCoupon} addCoupon={addCoupon}
+              toggleCoupon={toggleCoupon} deleteCoupon={deleteCoupon} fontDisplay={fontDisplay} />
+          ) : adminTab === "branding" ? (
+            <BrandingTab branding={branding} uploadLogo={uploadLogo} removeLogo={removeLogo} uploadHeroImages={uploadHeroImages} removeHeroImage={removeHeroImage} fontDisplay={fontDisplay} />
+          ) : (
+            <PaymentSettingsTab paymentInfo={paymentInfo} savePaymentInfo={savePaymentInfo} fontDisplay={fontDisplay} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* =================================================
+     前台商店畫面
+  ================================================= */
+  return (
+    <div style={{ ...fontBody, background: COLORS.cream, minHeight: "100vh", color: COLORS.cocoa }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 20, background: COLORS.cream, borderBottom: `1px solid ${COLORS.line}`, padding: isMobile ? "12px 16px" : "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12 }}>
+          {branding.logo && (
+            <img src={branding.logo} alt="logo" style={{ height: isMobile ? 36 : 44, width: isMobile ? 36 : 44, borderRadius: "50%", objectFit: "cover", border: `1px solid ${COLORS.line}` }} />
+          )}
+          <div>
+            <div style={{ ...fontDisplay, fontSize: isMobile ? 19 : 24, fontWeight: 900, letterSpacing: 0.5, lineHeight: 1.2 }}>日常甜寓</div>
+            <div style={{ fontSize: isMobile ? 10 : 11, letterSpacing: 1.5, color: COLORS.cocoaSoft, marginTop: 2, paddingLeft: 10 }}>365dayyinn</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 18 }}>
+          <button onClick={() => setLookupOpen(true)} style={{ fontSize: isMobile ? 12.5 : 12, color: COLORS.cocoaSoft, background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            查詢訂單
+          </button>
+          <button onClick={() => setCartOpen(true)} style={{ position: "relative", background: COLORS.cocoa, color: COLORS.cream, border: "none", borderRadius: 999, padding: isMobile ? "9px 16px" : "10px 18px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: isMobile ? 14.5 : 14 }}>
+            🛍 購物車
+            {cartCount > 0 && (
+              <span style={{ position: "absolute", top: -6, right: -6, background: COLORS.raspberry, color: "#fff", borderRadius: "50%", width: 20, height: 20, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {cartCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </header>
+
+      <section style={{
+        padding: isMobile ? "32px 20px 28px" : "56px 28px 40px",
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "1.1fr 0.9fr",
+        gap: isMobile ? 24 : 40,
+        alignItems: "center",
+        maxWidth: 1080,
+        margin: "0 auto",
+      }}>
+        <div>
+          <div style={{ fontSize: isMobile ? 13 : 13, color: COLORS.raspberry, marginBottom: 10, fontWeight: 700 }}>日常手作・一份甜，一份心意</div>
+          <h1 style={{ ...fontDisplay, fontSize: isMobile ? 28 : 40, lineHeight: 1.35, fontWeight: 900, margin: 0 }}>
+            讓每一天，<br />都有值得收藏的甜
+          </h1>
+          <p style={{ marginTop: 16, fontSize: isMobile ? 14.5 : 15, color: COLORS.cocoaSoft, maxWidth: isMobile ? "100%" : 420, lineHeight: 1.8 }}>
+            手作常溫甜點、餅乾與塔類，選用喜歡的食材，細心做好每一份甜，將日常的溫柔，分享給每一個值得的人。
+          </p>
+        </div>
+        <div style={{ position: "relative", background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 20, padding: heroImages.length ? 0 : 32, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", minHeight: isMobile ? 200 : 220 }}>
+          {heroImages.length ? (
+            <>
+              {heroImages.map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  alt="首圖"
+                  style={{
+                    position: "absolute", inset: 0, width: "100%", height: "100%", minHeight: 220,
+                    objectFit: "cover", display: "block",
+                    opacity: i === heroIndex ? 1 : 0, transition: "opacity 1s ease",
+                  }}
+                />
+              ))}
+              {heroImages.length > 1 && (
+                <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 6 }}>
+                  {heroImages.map((_, i) => (
+                    <span key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: i === heroIndex ? "#fff" : "rgba(255,255,255,0.5)", boxShadow: "0 0 2px rgba(0,0,0,0.3)" }} />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <DessertIcon type="cake" color={COLORS.raspberry} size={140} />
+          )}
+        </div>
+      </section>
+
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: isMobile ? "0 16px" : "0 28px" }}>
+        <div style={{ display: "flex", gap: 10, borderBottom: `1px solid ${COLORS.line}`, paddingBottom: 14, flexWrap: "wrap" }}>
+          {Object.keys(CATEGORY_LABEL).map((key) => (
+            <button key={key} onClick={() => setCategory(key)} style={{
+              padding: "8px 16px", borderRadius: 999, border: `1px solid ${category === key ? COLORS.cocoa : COLORS.line}`,
+              background: category === key ? COLORS.cocoa : "transparent", color: category === key ? COLORS.cream : COLORS.cocoaSoft,
+              fontSize: 13, cursor: "pointer",
+            }}>
+              {CATEGORY_LABEL[key]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <section style={{ maxWidth: 1080, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "28px 28px 80px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(240px, 1fr))", gap: isMobile ? 14 : 22 }}>
+        {products.map((p, i) => {
+          const color = PALETTE_ROTATE[i % PALETTE_ROTATE.length];
+          const qty = cart[p.id] || 0;
+          const isNew = p.createdAt && Date.now() - p.createdAt < 3 * 24 * 60 * 60 * 1000;
+          return (
+            <div key={p.id} style={{ position: "relative", background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 16, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+              {isNew && (
+                <span style={{ position: "absolute", top: 10, left: 10, background: COLORS.raspberry, color: "#fff", fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, letterSpacing: 0.5, zIndex: 1 }}>
+                  NEW
+                </span>
+              )}
+              <div style={{ background: COLORS.cream, borderRadius: 12, height: 100, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                {p.image ? (
+                  <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <DessertIcon type={p.category} color={color} />
+                )}
+              </div>
+              <div>
+                <div style={{ ...fontDisplay, fontWeight: 700, fontSize: 17 }}>{p.name}</div>
+                <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, marginTop: 4, lineHeight: 1.6 }}>{p.desc}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
+                <div style={{ fontWeight: 700, color, fontSize: 16 }}>{fmt(p.price)}</div>
+                {qty === 0 ? (
+                  <button onClick={() => changeQty(p.id, 1)} style={{ border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 999, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>
+                    加入購物車
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button onClick={() => changeQty(p.id, -1)} style={qtyBtnStyle}>−</button>
+                    <span style={{ fontSize: 14, minWidth: 14, textAlign: "center" }}>{qty}</span>
+                    <button onClick={() => changeQty(p.id, 1)} style={qtyBtnStyle}>+</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      {cartOpen && (
+        <CartDrawer cartItems={cartItems} subtotal={subtotal} discount={discount} shippingFee={shippingFee} cartShippingCategory={cartShippingCategory} total={total} changeQty={changeQty}
+          onClose={() => setCartOpen(false)}
+          onCheckout={() => { setCartOpen(false); setCheckoutOpen(true); }}
+          fontDisplay={fontDisplay} />
+      )}
+
+      {checkoutOpen && (
+        <CheckoutModal cartItems={cartItems} subtotal={subtotal} discount={discount} shippingFee={shippingFee} cartShippingCategory={cartShippingCategory} total={total}
+          couponCode={couponCode} setCouponCode={setCouponCode} applyCoupon={applyCoupon} couponMsg={couponMsg}
+          custName={custName} setCustName={setCustName} custPhone={custPhone} setCustPhone={setCustPhone}
+          custNote={custNote} setCustNote={setCustNote}
+          sameAsOrderer={sameAsOrderer} setSameAsOrderer={setSameAsOrderer}
+          recipientName={recipientName} setRecipientName={setRecipientName}
+          recipientPhone={recipientPhone} setRecipientPhone={setRecipientPhone}
+          deliveryMethod={deliveryMethod} setDeliveryMethod={setDeliveryMethod}
+          deliveryDetail={deliveryDetail} setDeliveryDetail={setDeliveryDetail}
+          onClose={() => setCheckoutOpen(false)} onSubmit={submitOrder} fontDisplay={fontDisplay} />
+      )}
+
+      {orderDone && (
+        <div style={overlayStyle}>
+          <div style={{ ...modalCardStyle, textAlign: "center", maxWidth: 380 }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: COLORS.matchaSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", fontSize: 24 }}>
+              ✓
+            </div>
+            <div style={{ ...fontDisplay, fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              {orderDone.paymentConfirmed ? "訂單已確認" : "訂單已送出"}
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 16 }}>
+              訂單編號 {orderDone.id}，總金額 {fmt(orderDone.total)}。
+            </div>
+
+            {!orderDone.paymentConfirmed && (
+              <div style={{ textAlign: "left", background: COLORS.cream, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12.5, lineHeight: 1.9, color: COLORS.cocoaSoft }}>
+                <div style={{ fontWeight: 700, color: COLORS.cocoa, marginBottom: 4 }}>請匯款至以下帳號</div>
+                {paymentInfo && paymentInfo.accountNumber ? (
+                  <>
+                    <div>銀行：{paymentInfo.bankName}{paymentInfo.bankCode ? `（${paymentInfo.bankCode}）` : ""}</div>
+                    <div>帳號：{paymentInfo.accountNumber}</div>
+                    <div>戶名：{paymentInfo.accountHolder}</div>
+                  </>
+                ) : (
+                  <div>店家尚未設定匯款帳號，請與我們聯繫確認付款方式。</div>
+                )}
+                <div style={{ marginTop: 10, fontWeight: 700, color: COLORS.cocoa }}>完成匯款後，請填寫帳號後五碼確認訂單：</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input
+                    placeholder="匯款帳號後五碼"
+                    value={transferLast5Input}
+                    onChange={(e) => setTransferLast5Input(e.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button onClick={confirmTransferPayment} style={{ border: "none", background: COLORS.raspberry, color: "#fff", borderRadius: 10, padding: "0 16px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+                    確認訂單
+                  </button>
+                </div>
+                {transferLast5Error && <div style={{ color: COLORS.raspberry, fontSize: 12, marginTop: 6 }}>{transferLast5Error}</div>}
+                <div style={{ marginTop: 8, fontSize: 11.5 }}>
+                  請於 48 小時內完成匯款確認（期限：{new Date(orderDone.paymentDeadline).toLocaleString("zh-TW")}）。
+                  若現在不方便填寫，也可以先關閉視窗，之後到「查詢訂單」用聯絡電話找到這筆訂單再繼續填寫。
+                </div>
+              </div>
+            )}
+
+            {orderDone.paymentConfirmed && (
+              <div style={{ fontSize: 12.5, color: COLORS.matcha, marginBottom: 16, fontWeight: 700 }}>
+                已收到您的匯款後五碼（{orderDone.transferLast5}），我們會盡快為您確認並準備。
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button onClick={() => setOrderDone(null)} style={{ border: `1px solid ${COLORS.line}`, background: "transparent", color: COLORS.cocoa, borderRadius: 999, padding: "10px 20px", cursor: "pointer", fontSize: 13 }}>
+                繼續選購
+              </button>
+              <button onClick={() => { setLookupPhone(orderDone.phone || ""); setLookupOpen(true); setOrderDone(null); }} style={{ border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 999, padding: "10px 20px", cursor: "pointer", fontSize: 13 }}>
+                查看訂單狀態
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lookupOpen && (
+        <OrderLookupModal orders={orders} initialPhone={lookupPhone} onClose={() => setLookupOpen(false)} confirmTransferPaymentFor={confirmTransferPaymentFor} fontDisplay={fontDisplay} />
+      )}
+    </div>
+  );
+}
+
+const qtyBtnStyle = { width: 24, height: 24, borderRadius: "50%", border: `1px solid ${COLORS.line}`, background: COLORS.cream, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
+const overlayStyle = { position: "fixed", inset: 0, background: "rgba(43,24,16,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 };
+const modalCardStyle = { background: COLORS.paperWhite, borderRadius: 18, padding: 28, width: "100%", maxWidth: 420 };
+
+function CartDrawer({ cartItems, subtotal, discount, shippingFee, cartShippingCategory, total, changeQty, onClose, onCheckout, fontDisplay }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 40 }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(43,24,16,0.35)" }} />
+      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 360, maxWidth: "90vw", background: COLORS.paperWhite, boxShadow: "-8px 0 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", padding: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ ...fontDisplay, fontSize: 18, fontWeight: 700 }}>購物車</div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+
+        {cartItems.length === 0 ? (
+          <div style={{ color: COLORS.cocoaSoft, fontSize: 13, marginTop: 40, textAlign: "center" }}>購物車還是空的，去挑選喜歡的甜點吧。</div>
+        ) : (
+          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+            {cartItems.map((item) => (
+              <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>{item.name}</div>
+                  <div style={{ fontSize: 12, color: COLORS.cocoaSoft }}>{fmt(item.price)}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => changeQty(item.id, -1)} style={qtyBtnStyle}>−</button>
+                  <span style={{ fontSize: 13, minWidth: 12, textAlign: "center" }}>{item.qty}</span>
+                  <button onClick={() => changeQty(item.id, 1)} style={qtyBtnStyle}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {cartItems.length > 0 && (
+          <div style={{ borderTop: `1px solid ${COLORS.line}`, paddingTop: 16, marginTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}><span>小計</span><span>{fmt(subtotal)}</span></div>
+            {discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6, color: COLORS.raspberry }}><span>優惠折抵</span><span>-{fmt(discount)}</span></div>}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}><span>運費（{SHIPPING_CATEGORY_LABEL[cartShippingCategory]}）</span><span>{shippingFee === 0 ? "免運" : fmt(shippingFee)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, marginTop: 8 }}><span>總計</span><span>{fmt(total)}</span></div>
+            <button onClick={onCheckout} style={{ width: "100%", marginTop: 16, border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 999, padding: "12px 0", cursor: "pointer", fontSize: 14 }}>前往結帳</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CheckoutModal(props) {
+  const { cartItems, subtotal, discount, shippingFee, cartShippingCategory, total, couponCode, setCouponCode, applyCoupon, couponMsg,
+    custName, setCustName, custPhone, setCustPhone, custNote, setCustNote,
+    sameAsOrderer, setSameAsOrderer, recipientName, setRecipientName, recipientPhone, setRecipientPhone,
+    deliveryMethod, setDeliveryMethod, deliveryDetail, setDeliveryDetail,
+    onClose, onSubmit, fontDisplay } = props;
+
+  const allowStorePickup = cartShippingCategory === "ambient";
+
+  const segBtnStyle = (active) => ({
+    flex: 1, padding: "10px 0", borderRadius: 10,
+    border: `1px solid ${active ? COLORS.cocoa : COLORS.line}`,
+    background: active ? COLORS.cocoa : "transparent",
+    color: active ? COLORS.cream : COLORS.cocoaSoft,
+    fontSize: 13, cursor: "pointer",
+  });
+
+  const canSubmit =
+    cartItems.length > 0 &&
+    custName.trim().length > 0 &&
+    custPhone.trim().length > 0 &&
+    deliveryDetail.trim().length > 0 &&
+    (sameAsOrderer || (recipientName.trim().length > 0 && recipientPhone.trim().length > 0));
+
+  return (
+    <div style={overlayStyle}>
+      <div style={{ ...modalCardStyle, maxWidth: 460, maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <div style={{ ...fontDisplay, fontSize: 19, fontWeight: 700 }}>結帳資訊</div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+          <input placeholder="姓名（必填）" value={custName} onChange={(e) => setCustName(e.target.value)} style={inputStyle} />
+          <input placeholder="聯絡電話（必填）" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} style={inputStyle} />
+          <textarea placeholder="備註（例如取貨時間、口味調整）" value={custNote} onChange={(e) => setCustNote(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+        </div>
+        {(!custName.trim() || !custPhone.trim()) && (
+          <div style={{ fontSize: 12, color: COLORS.raspberry, marginTop: -12, marginBottom: 14 }}>訂購人姓名與聯絡電話為必填欄位。</div>
+        )}
+
+        {/* 收件人資訊 */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>收件人資訊</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: COLORS.cocoaSoft, cursor: "pointer" }}>
+              <input type="checkbox" checked={sameAsOrderer} onChange={(e) => setSameAsOrderer(e.target.checked)} />
+              同訂購人
+            </label>
+          </div>
+          {sameAsOrderer ? (
+            <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, background: COLORS.cream, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 12 }}>
+              收件人：{custName || "（尚未填寫姓名）"} · {custPhone || "（尚未填寫電話）"}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input placeholder="收件人姓名（必填）" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} style={inputStyle} />
+              <input placeholder="收件人電話（必填）" value={recipientPhone} onChange={(e) => setRecipientPhone(e.target.value)} style={inputStyle} />
+            </div>
+          )}
+        </div>
+
+        {/* 取貨方式 */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>取貨方式</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button type="button" disabled={!allowStorePickup} onClick={() => { setDeliveryMethod("711"); setDeliveryDetail(""); }} style={{ ...segBtnStyle(deliveryMethod === "711"), opacity: allowStorePickup ? 1 : 0.4, cursor: allowStorePickup ? "pointer" : "not-allowed" }}>7-11 取貨</button>
+            <button type="button" onClick={() => { setDeliveryMethod("blackcat"); setDeliveryDetail(""); }} style={segBtnStyle(deliveryMethod === "blackcat")}>黑貓宅配</button>
+          </div>
+          {!allowStorePickup && (
+            <div style={{ fontSize: 11.5, color: COLORS.cocoaSoft, marginBottom: 8 }}>
+              購物車內含{cartShippingCategory === "chilled" ? "冷藏" : "彌月／婚禮"}商品，僅提供黑貓宅配。
+            </div>
+          )}
+          {deliveryMethod === "711" ? (
+            <div>
+              <input placeholder="請輸入取貨門市名稱（例如：台中中華店）" value={deliveryDetail} onChange={(e) => setDeliveryDetail(e.target.value)} style={inputStyle} />
+              <a href="https://emap.pcsc.com.tw/" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 6, fontSize: 12, color: COLORS.raspberry, textDecoration: "underline" }}>
+                開啟 7-11 官方門市查詢地圖 ↗
+              </a>
+            </div>
+          ) : (
+            <input placeholder="請輸入宅配收件地址" value={deliveryDetail} onChange={(e) => setDeliveryDetail(e.target.value)} style={inputStyle} />
+          )}
+          <div style={{ marginTop: 10, fontSize: 11.5, color: COLORS.cocoaSoft, background: COLORS.cream, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: "8px 10px" }}>
+            {cartShippingCategory === "ambient" && deliveryMethod === "711" && "常溫商品 7-ELEVEN 店到店運費 NT$60，滿 NT$699 免運。"}
+            {cartShippingCategory === "ambient" && deliveryMethod === "blackcat" && "常溫商品黑貓宅配運費 NT$130，滿 NT$999 免運。"}
+            {cartShippingCategory === "chilled" && "冷藏商品黑貓冷藏運費 NT$160 起，滿 NT$1,500 免運。"}
+            {cartShippingCategory === "gift" && "彌月／婚禮商品黑貓宅配滿 NT$3,000 免運，大量訂購另有專屬優惠，歡迎與我們聯繫。"}
+          </div>
+        </div>
+
+        {/* 付款方式 */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>付款方式</div>
+          <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, background: COLORS.cream, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 12 }}>
+            匯款付款。送出訂單後會顯示店家的匯款帳號，請完成轉帳並填寫後五碼確認訂單。
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+          <input placeholder="輸入優惠碼" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={applyCoupon} style={{ border: `1px solid ${COLORS.cocoa}`, background: "transparent", borderRadius: 10, padding: "0 16px", cursor: "pointer", fontSize: 13 }}>套用</button>
+        </div>
+        {couponMsg && <div style={{ fontSize: 12, color: COLORS.raspberry, marginBottom: 10 }}>{couponMsg}</div>}
+
+        <div style={{ borderTop: `1px solid ${COLORS.line}`, paddingTop: 14, marginTop: 8 }}>
+          {cartItems.map((item) => (
+            <div key={item.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6, color: COLORS.cocoaSoft }}>
+              <span>{item.name} x{item.qty}</span><span>{fmt(item.price * item.qty)}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 8 }}><span>小計</span><span>{fmt(subtotal)}</span></div>
+          {discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: COLORS.raspberry }}><span>優惠折抵</span><span>-{fmt(discount)}</span></div>}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>運費</span><span>{shippingFee === 0 ? "免運" : fmt(shippingFee)}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 8 }}><span>應付總額</span><span>{fmt(total)}</span></div>
+        </div>
+
+        {!canSubmit && cartItems.length > 0 && (
+          <div style={{ fontSize: 12, color: COLORS.raspberry, marginTop: 10 }}>
+            {!custName.trim() || !custPhone.trim()
+              ? "請填寫訂購人姓名與聯絡電話後才能送出訂單。"
+              : !sameAsOrderer && (!recipientName.trim() || !recipientPhone.trim())
+              ? "請填寫收件人姓名與電話後才能送出訂單。"
+              : `請填寫${deliveryMethod === "711" ? "取貨門市" : "收件地址"}後才能送出訂單。`}
+          </div>
+        )}
+
+        <button onClick={onSubmit} disabled={!canSubmit} style={{
+          width: "100%", marginTop: 18, border: "none", background: !canSubmit ? COLORS.line : COLORS.raspberry,
+          color: "#fff", borderRadius: 999, padding: "13px 0", cursor: !canSubmit ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 700,
+        }}>
+          送出訂單
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle = { border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 12px", fontSize: 13.5, fontFamily: "'Noto Sans TC', sans-serif", outline: "none", background: COLORS.cream, width: "100%" };
+
+/* ---------------------------------------------------------
+   顧客查詢訂單彈窗
+--------------------------------------------------------- */
+function OrderLookupModal({ orders, initialPhone, onClose, confirmTransferPaymentFor, fontDisplay }) {
+  const [phone, setPhone] = useState(initialPhone || "");
+  const [searched, setSearched] = useState(!!initialPhone);
+
+  const results = useMemo(() => {
+    const q = phone.trim();
+    if (!q) return [];
+    return orders.filter((o) => o.phone && o.phone.trim() === q);
+  }, [orders, phone]);
+
+  return (
+    <div style={overlayStyle}>
+      <div style={{ ...modalCardStyle, maxWidth: 440, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ ...fontDisplay, fontSize: 18, fontWeight: 700 }}>查詢我的訂單</div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+
+        <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, marginBottom: 12 }}>
+          輸入下單時填寫的聯絡電話，查詢訂單目前的處理進度。
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input placeholder="請輸入聯絡電話" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={() => setSearched(true)} style={{ border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 10, padding: "0 18px", cursor: "pointer", fontSize: 13 }}>
+            查詢
+          </button>
+        </div>
+
+        {searched && (
+          results.length === 0 ? (
+            <div style={emptyBoxStyle}>查無符合此電話號碼的訂單，請確認電話是否輸入正確。</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {results.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((o) => (
+                <OrderLookupCard key={o.id} order={o} confirmTransferPaymentFor={confirmTransferPaymentFor} />
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrderLookupCard({ order: o, confirmTransferPaymentFor }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const st = statusStyle(o.status);
+  const expired = !o.paymentConfirmed && o.paymentDeadline && Date.now() > o.paymentDeadline;
+
+  const handleConfirm = async () => {
+    const result = await confirmTransferPaymentFor(o.id, code);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError("");
+  };
+
+  return (
+    <div style={{ border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{o.id}</div>
+        <span style={{ fontSize: 11.5, padding: "3px 10px", borderRadius: 999, background: st.bg, color: st.color, fontWeight: 700 }}>{o.status}</span>
+      </div>
+      <div style={{ fontSize: 12, color: COLORS.cocoaSoft, marginBottom: 6 }}>{new Date(o.createdAt).toLocaleString("zh-TW")}</div>
+      <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, marginBottom: 6 }}>{o.items.map((it) => `${it.name} x${it.qty}`).join("、")}</div>
+      <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, marginBottom: 6 }}>
+        {o.deliveryMethod === "711" ? `7-11 取貨門市：${o.deliveryDetail || "—"}` : `黑貓宅配地址：${o.deliveryDetail || "—"}`}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+        <span>應付金額</span><span>{fmt(o.total)}</span>
+      </div>
+
+      {o.paymentConfirmed ? (
+        <div style={{ fontSize: 12.5, color: COLORS.matcha, fontWeight: 700 }}>已確認匯款（後五碼 {o.transferLast5}）</div>
+      ) : expired ? (
+        <div style={{ fontSize: 12.5, color: COLORS.raspberry, fontWeight: 700 }}>已超過 48 小時付款確認期限，請直接與店家聯繫確認訂單。</div>
+      ) : (
+        <div style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 12, color: COLORS.raspberry, fontWeight: 700, marginBottom: 6 }}>
+            尚未確認匯款{o.paymentDeadline ? `（期限：${new Date(o.paymentDeadline).toLocaleString("zh-TW")}）` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input placeholder="匯款帳號後五碼" value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 5))} style={{ ...inputStyle, flex: 1 }} />
+            <button onClick={handleConfirm} style={{ border: "none", background: COLORS.raspberry, color: "#fff", borderRadius: 10, padding: "0 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700 }}>
+              確認訂單
+            </button>
+          </div>
+          {error && <div style={{ color: COLORS.raspberry, fontSize: 11.5, marginTop: 6 }}>{error}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   自製長條圖（取代 recharts，讓檔案不依賴任何套件）
+--------------------------------------------------------- */
+function MonthlyBarChart({ data }) {
+  const max = Math.max(...data.map((d) => d.revenue), 1);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 16, height: 220, padding: "0 8px" }}>
+      {data.map((d) => (
+        <div key={d.month} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, height: "100%", justifyContent: "flex-end" }}>
+          <div style={{ fontSize: 11, color: COLORS.cocoaSoft, fontWeight: 700 }}>{fmt(d.revenue)}</div>
+          <div style={{ width: "60%", minWidth: 24, background: COLORS.raspberry, borderRadius: "6px 6px 0 0", height: Math.max(6, (d.revenue / max) * 150) }} />
+          <div style={{ fontSize: 11.5, color: COLORS.cocoaSoft }}>{d.month}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DashboardTab({ monthlyReport, totalRevenue, orderCount, fontDisplay }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, color: COLORS.cocoa }}>銷售報表</div>
+        <button
+          onClick={() => window.open(window.location.pathname + window.location.search + "#dashboard", "_blank")}
+          style={{ fontSize: 12, color: COLORS.raspberry, background: "transparent", border: `1px solid ${COLORS.raspberry}`, borderRadius: 999, padding: "5px 12px", cursor: "pointer" }}
+        >
+          獨立開啟儀表板 ↗
+        </button>
+      </div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24 }}>依月份彙整的營收與訂單數</div>
+
+      <div style={{ display: "flex", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
+        <StatCard label="累計營收" value={fmt(totalRevenue)} accent={COLORS.raspberry} />
+        <StatCard label="累計訂單數" value={`${orderCount} 筆`} accent={COLORS.matcha} />
+        <StatCard label="平均客單價" value={orderCount ? fmt(Math.round(totalRevenue / orderCount)) : "—"} accent={COLORS.caramel} />
+      </div>
+
+      {monthlyReport.length === 0 ? (
+        <div style={emptyBoxStyle}>目前還沒有訂單資料，開始販售後這裡會顯示每月報表。</div>
+      ) : (
+        <>
+          <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 16, padding: 20, marginBottom: 24 }}>
+            <MonthlyBarChart data={monthlyReport} />
+          </div>
+          <table style={tableStyle}>
+            <thead><tr><th style={thStyle}>月份</th><th style={thStyle}>訂單數</th><th style={thStyle}>營收</th></tr></thead>
+            <tbody>
+              {monthlyReport.map((m) => (
+                <tr key={m.month}><td style={tdStyle}>{m.month}</td><td style={tdStyle}>{m.count}</td><td style={tdStyle}>{fmt(m.revenue)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{ flex: 1, minWidth: 160, background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: "16px 18px", borderTop: `3px solid ${accent}` }}>
+      <div style={{ fontSize: 12, color: COLORS.cocoaSoft, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: COLORS.cocoa }}>{value}</div>
+    </div>
+  );
+}
+
+const STATUS_OPTIONS = ["待處理", "製作中", "已出貨", "已完成", "已取消"];
+
+function statusStyle(status) {
+  switch (status) {
+    case "待處理": return { bg: "#F1E7DC", color: COLORS.cocoaSoft };
+    case "製作中": return { bg: "#F6E7CE", color: COLORS.caramel };
+    case "已出貨": return { bg: COLORS.matchaSoft, color: COLORS.matcha };
+    case "已完成": return { bg: "#F7E1E5", color: COLORS.raspberry };
+    case "已取消": return { bg: "#EFEFEF", color: "#999" };
+    default: return { bg: COLORS.cream, color: COLORS.cocoaSoft };
+  }
+}
+
+function OrdersTab({ orders, updateOrderStatus, fontDisplay }) {
+  return (
+    <div>
+      <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, marginBottom: 4, color: COLORS.cocoa }}>訂單管理</div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24 }}>共 {orders.length} 筆訂單</div>
+
+      {orders.length === 0 ? (
+        <div style={emptyBoxStyle}>還沒有任何訂單。</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {orders.map((o) => (
+            <div key={o.id} style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{o.id}</div>
+                  <div style={{ fontSize: 12, color: COLORS.cocoaSoft, marginTop: 2 }}>
+                    {new Date(o.createdAt).toLocaleString("zh-TW")} · 訂購人：{o.customerName}{o.phone ? ` (${o.phone})` : ""}
+                  </div>
+                  {o.recipientName && (o.recipientName !== o.customerName || o.recipientPhone !== o.phone) && (
+                    <div style={{ fontSize: 12, color: COLORS.cocoaSoft, marginTop: 2 }}>
+                      收件人：{o.recipientName}{o.recipientPhone ? ` (${o.recipientPhone})` : ""}
+                    </div>
+                  )}
+                </div>
+                <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 12.5, background: COLORS.cream }}>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 8 }}>{o.items.map((it) => `${it.name} x${it.qty}`).join("、")}</div>
+              <div style={{ fontSize: 12.5, color: COLORS.cocoaSoft, marginBottom: 8 }}>
+                {o.deliveryMethod === "711" ? `7-11 取貨門市：${o.deliveryDetail || "—"}` : `黑貓宅配地址：${o.deliveryDetail || "—"}`}
+                {" · "}付款方式：匯款{" · "}
+                {o.paymentConfirmed ? (
+                  <span style={{ color: COLORS.matcha, fontWeight: 700 }}>已確認匯款（後五碼 {o.transferLast5}）</span>
+                ) : o.paymentDeadline && Date.now() > o.paymentDeadline ? (
+                  <span style={{ color: COLORS.raspberry, fontWeight: 700 }}>已逾 48 小時付款期限，尚未確認</span>
+                ) : (
+                  <span style={{ color: COLORS.raspberry, fontWeight: 700 }}>
+                    尚未確認匯款{o.paymentDeadline ? `（期限：${new Date(o.paymentDeadline).toLocaleString("zh-TW")}）` : ""}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, flexWrap: "wrap", gap: 8 }}>
+                <span style={{ color: COLORS.cocoaSoft }}>
+                  {o.couponCode ? `優惠碼 ${o.couponCode} · 折抵 ${fmt(o.discount)}` : "未使用優惠碼"}
+                  {" · "}運費 {o.shippingFee === 0 ? "免運" : fmt(o.shippingFee || 0)}
+                  {o.note ? ` · 備註：${o.note}` : ""}
+                </span>
+                <span style={{ fontWeight: 700 }}>{fmt(o.total)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductsTab({ catalog, newProduct, setNewProduct, saveProduct, startEditProduct, cancelEditProduct, editingProductId, deleteProduct, fontDisplay }) {
+  return (
+    <div>
+      <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, marginBottom: 4, color: COLORS.cocoa }}>商品管理</div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24 }}>新增、修改或下架前台販售的甜點品項，儲存後前台會立即更新。</div>
+
+      <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 18, marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+          <Field label="品名"><input value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="例如 草莓千層" style={inputStyle} /></Field>
+          <Field label="分類">
+            <select value={newProduct.category} onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })} style={inputStyle}>
+              <option value="cake">蛋糕</option>
+              <option value="cookie">餅乾</option>
+              <option value="drink">常溫甜點</option>
+              <option value="giftbox">禮盒</option>
+            </select>
+          </Field>
+          {newProduct.category === "giftbox" && (
+            <Field label="上架截止日（選填）">
+              <input type="date" value={newProduct.availableUntil} onChange={(e) => setNewProduct({ ...newProduct, availableUntil: e.target.value })} style={inputStyle} />
+            </Field>
+          )}
+          <Field label="運費類別">
+            <select value={newProduct.shippingCategory} onChange={(e) => setNewProduct({ ...newProduct, shippingCategory: e.target.value })} style={inputStyle}>
+              <option value="ambient">常溫商品</option>
+              <option value="chilled">冷藏</option>
+              <option value="gift">彌月／婚禮</option>
+            </select>
+          </Field>
+          <Field label="價格 (NT$)"><input type="number" value={newProduct.price} onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })} style={{ ...inputStyle, width: 100 }} /></Field>
+          <Field label="簡介（選填）"><input value={newProduct.desc} onChange={(e) => setNewProduct({ ...newProduct, desc: e.target.value })} placeholder="一句話介紹口感或風味" style={{ ...inputStyle, width: 220 }} /></Field>
+          <Field label="商品照片（選填）">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {newProduct.image && (
+                <img src={newProduct.image} alt="預覽" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", border: `1px solid ${COLORS.line}` }} />
+              )}
+              <input type="file" accept="image/*" onChange={async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                const dataUrl = await readImageFileAsCompressedDataURL(file, 600, 0.82);
+                setNewProduct({ ...newProduct, image: dataUrl });
+                e.target.value = "";
+              }} style={{ fontSize: 12 }} />
+              {newProduct.image && (
+                <button type="button" onClick={() => setNewProduct({ ...newProduct, image: null })} style={{ ...linkBtnStyle, whiteSpace: "nowrap" }}>移除</button>
+              )}
+            </div>
+          </Field>
+          <button onClick={saveProduct} style={{ border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 13, height: 40 }}>
+            {editingProductId ? "儲存修改" : "新增商品"}
+          </button>
+          {editingProductId && (
+            <button onClick={cancelEditProduct} style={{ border: `1px solid ${COLORS.line}`, background: "transparent", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 13, height: 40 }}>取消</button>
+          )}
+        </div>
+      </div>
+
+      {catalog.length === 0 ? (
+        <div style={emptyBoxStyle}>目前沒有任何商品，請先新增。</div>
+      ) : (
+        <table style={tableStyle}>
+          <thead><tr><th style={thStyle}></th><th style={thStyle}>品名</th><th style={thStyle}>分類</th><th style={thStyle}>價格</th><th style={thStyle}>簡介</th><th style={thStyle}>運費類別</th><th style={thStyle}>上架截止</th><th style={thStyle}></th></tr></thead>
+          <tbody>
+            {catalog.map((p) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const expired = p.category === "giftbox" && p.availableUntil && p.availableUntil < today;
+              return (
+                <tr key={p.id}>
+                  <td style={tdStyle}>
+                    {p.image ? (
+                      <img src={p.image} alt={p.name} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ width: 36, height: 36, borderRadius: 8, background: COLORS.cream }} />
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle, fontWeight: 700 }}>{p.name}</td>
+                  <td style={tdStyle}>{CATEGORY_LABEL[p.category]}</td>
+                  <td style={tdStyle}>{fmt(p.price)}</td>
+                  <td style={{ ...tdStyle, color: COLORS.cocoaSoft, fontSize: 12.5 }}>{p.desc}</td>
+                  <td style={tdStyle}>{SHIPPING_CATEGORY_LABEL[p.shippingCategory] || "常溫商品"}</td>
+                  <td style={tdStyle}>
+                    {p.category === "giftbox" ? (
+                      p.availableUntil ? (
+                        <span style={{ color: expired ? COLORS.raspberry : COLORS.cocoaSoft, fontWeight: expired ? 700 : 400 }}>
+                          {p.availableUntil}{expired ? "（已過期）" : ""}
+                        </span>
+                      ) : (<span style={{ color: COLORS.cocoaSoft }}>無期限</span>)
+                    ) : (<span style={{ color: COLORS.cocoaSoft }}>—</span>)}
+                  </td>
+                  <td style={tdStyle}>
+                    <button onClick={() => startEditProduct(p)} style={linkBtnStyle}>編輯</button>
+                    <button onClick={() => deleteProduct(p.id)} style={{ ...linkBtnStyle, color: COLORS.raspberry, marginLeft: 10 }}>刪除</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function BrandingTab({ branding, uploadLogo, removeLogo, uploadHeroImages, removeHeroImage, fontDisplay }) {
+  const heroImages = branding.heroImages && branding.heroImages.length ? branding.heroImages : (branding.hero ? [branding.hero] : []);
+
+  return (
+    <div>
+      <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, marginBottom: 4, color: COLORS.cocoa }}>外觀設定</div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24 }}>
+        上傳你自己的 Logo 和首頁主視覺照片，上傳後前台會立即更新。建議使用清晰、明亮的照片。
+      </div>
+
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 20, flex: "1 1 280px" }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>店家 Logo</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+            <div style={{ width: 72, height: 72, borderRadius: "50%", background: COLORS.cream, border: `1px solid ${COLORS.line}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+              {branding.logo ? (
+                <img src={branding.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 11, color: COLORS.cocoaSoft }}>尚未上傳</span>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <input type="file" accept="image/*" onChange={(e) => {
+                const file = e.target.files && e.target.files[0];
+                if (file) uploadLogo(file);
+                e.target.value = "";
+              }} style={{ fontSize: 12 }} />
+              {branding.logo && <button onClick={removeLogo} style={{ ...linkBtnStyle, color: COLORS.raspberry, alignSelf: "flex-start" }}>移除 Logo</button>}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.cocoaSoft, lineHeight: 1.6 }}>會顯示在網站左上角店名旁邊，建議使用正方形圖片。</div>
+        </div>
+
+        <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 20, flex: "1 1 380px" }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>首頁主視覺照片（可上傳多張，自動輪播）</div>
+
+          {heroImages.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 10, marginBottom: 14 }}>
+              {heroImages.map((src, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  <img src={src} alt={`首圖 ${i + 1}`} style={{ width: "100%", height: 70, borderRadius: 8, objectFit: "cover", border: `1px solid ${COLORS.line}` }} />
+                  <button
+                    onClick={() => removeHeroImage(i)}
+                    style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", border: "none", background: COLORS.raspberry, color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+                    title="移除這張照片"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => {
+              const files = e.target.files;
+              if (files && files.length) uploadHeroImages(files);
+              e.target.value = "";
+            }}
+            style={{ fontSize: 12 }}
+          />
+
+          <div style={{ fontSize: 12, color: COLORS.cocoaSoft, lineHeight: 1.6, marginTop: 10 }}>
+            會依照上傳順序，自動輪播顯示在首頁最上方的大圖區塊，建議上傳 3～6 張橫向、明亮的甜點照片，效果最好。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaymentSettingsTab({ paymentInfo, savePaymentInfo, fontDisplay }) {
+  const [form, setForm] = useState(paymentInfo || { bankName: "", bankCode: "", accountNumber: "", accountHolder: "" });
+  const [saved, setSaved] = useState(false);
+
+  return (
+    <div>
+      <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, marginBottom: 4, color: COLORS.cocoa }}>收款設定</div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24, maxWidth: 560, lineHeight: 1.8 }}>
+        設定顧客下單後看到的匯款帳號。顧客送出訂單後會看到這裡填寫的帳號資訊，並需要填寫匯款後五碼才能確認訂單成立，
+        請留意在「訂單管理」核對後五碼與實際入帳金額是否相符。
+      </div>
+
+      <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 20, maxWidth: 480 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>匯款帳號資訊</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Field label="銀行名稱"><input value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} placeholder="例如 中國信託" style={inputStyle} /></Field>
+          <Field label="銀行代碼（選填）"><input value={form.bankCode} onChange={(e) => setForm({ ...form, bankCode: e.target.value })} placeholder="例如 822" style={inputStyle} /></Field>
+          <Field label="帳號"><input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} placeholder="請輸入收款帳號" style={inputStyle} /></Field>
+          <Field label="戶名"><input value={form.accountHolder} onChange={(e) => setForm({ ...form, accountHolder: e.target.value })} placeholder="請輸入戶名" style={inputStyle} /></Field>
+        </div>
+        <button onClick={() => { savePaymentInfo(form); setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={{ marginTop: 16, border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 13 }}>
+          儲存設定
+        </button>
+        {saved && <span style={{ marginLeft: 12, fontSize: 12.5, color: COLORS.matcha }}>已儲存</span>}
+      </div>
+    </div>
+  );
+}
+
+function CouponsTab({ coupons, newCoupon, setNewCoupon, addCoupon, toggleCoupon, deleteCoupon, fontDisplay }) {
+  return (
+    <div>
+      <div style={{ ...fontDisplay, fontSize: 24, fontWeight: 900, marginBottom: 4, color: COLORS.cocoa }}>優惠券管理</div>
+      <div style={{ fontSize: 13, color: COLORS.cocoaSoft, marginBottom: 24 }}>建立與管理顧客可使用的優惠碼</div>
+
+      <div style={{ background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 18, marginBottom: 24, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <Field label="優惠碼"><input value={newCoupon.code} onChange={(e) => setNewCoupon({ ...newCoupon, code: e.target.value })} placeholder="例如 SWEET100" style={inputStyle} /></Field>
+        <Field label="折扣類型">
+          <select value={newCoupon.type} onChange={(e) => setNewCoupon({ ...newCoupon, type: e.target.value })} style={inputStyle}>
+            <option value="percent">百分比折扣 (%)</option>
+            <option value="amount">固定金額折抵 (NT$)</option>
+          </select>
+        </Field>
+        <Field label="數值"><input type="number" value={newCoupon.value} onChange={(e) => setNewCoupon({ ...newCoupon, value: e.target.value })} style={{ ...inputStyle, width: 90 }} /></Field>
+        <Field label="到期日（選填）"><input type="date" value={newCoupon.expiresAt} onChange={(e) => setNewCoupon({ ...newCoupon, expiresAt: e.target.value })} style={inputStyle} /></Field>
+        <button onClick={addCoupon} style={{ border: "none", background: COLORS.cocoa, color: COLORS.cream, borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 13, height: 40 }}>新增優惠碼</button>
+      </div>
+
+      {coupons.length === 0 ? (
+        <div style={emptyBoxStyle}>還沒有建立任何優惠碼。</div>
+      ) : (
+        <table style={tableStyle}>
+          <thead><tr><th style={thStyle}>優惠碼</th><th style={thStyle}>折扣</th><th style={thStyle}>到期日</th><th style={thStyle}>狀態</th><th style={thStyle}></th></tr></thead>
+          <tbody>
+            {coupons.map((c) => (
+              <tr key={c.code}>
+                <td style={{ ...tdStyle, fontWeight: 700 }}>{c.code}</td>
+                <td style={tdStyle}>{c.type === "percent" ? `${c.value}%` : fmt(c.value)}</td>
+                <td style={tdStyle}>{c.expiresAt || "無期限"}</td>
+                <td style={tdStyle}>
+                  <span style={{ fontSize: 12, padding: "3px 10px", borderRadius: 999, background: c.active ? COLORS.matchaSoft : "#F1E7DC", color: c.active ? COLORS.matcha : COLORS.cocoaSoft }}>
+                    {c.active ? "啟用中" : "已停用"}
+                  </span>
+                </td>
+                <td style={tdStyle}>
+                  <button onClick={() => toggleCoupon(c.code)} style={linkBtnStyle}>{c.active ? "停用" : "啟用"}</button>
+                  <button onClick={() => deleteCoupon(c.code)} style={{ ...linkBtnStyle, color: COLORS.raspberry, marginLeft: 10 }}>刪除</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 4 }}><span style={{ fontSize: 11.5, color: COLORS.cocoaSoft }}>{label}</span>{children}</div>;
+}
+
+const tableStyle = { width: "100%", borderCollapse: "collapse", background: COLORS.paperWhite, border: `1px solid ${COLORS.line}`, borderRadius: 14, overflow: "hidden", fontSize: 13.5 };
+const thStyle = { textAlign: "left", padding: "10px 16px", background: COLORS.matchaSoft, color: COLORS.cocoaSoft, fontWeight: 700, fontSize: 12 };
+const tdStyle = { padding: "10px 16px", borderTop: `1px solid ${COLORS.line}`, color: COLORS.cocoa };
+const linkBtnStyle = { border: "none", background: "transparent", color: COLORS.cocoaSoft, cursor: "pointer", fontSize: 12.5, textDecoration: "underline" };
+const emptyBoxStyle = { border: `1px dashed ${COLORS.line}`, borderRadius: 14, padding: "40px 20px", textAlign: "center", color: COLORS.cocoaSoft, fontSize: 13 };
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<DessertShop />);
+</script>
+</body>
+</html>
